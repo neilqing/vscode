@@ -54,10 +54,10 @@ export interface IView {
 }
 
 interface ISashEvent {
-	sash: Sash;
-	start: number;
-	current: number;
-	alt: boolean;
+	readonly sash: Sash;
+	readonly start: number;
+	readonly current: number;
+	readonly alt: boolean;
 }
 
 type ViewItemSize = number | { cachedVisibleSize: number };
@@ -109,6 +109,10 @@ abstract class ViewItem {
 	get priority(): LayoutPriority | undefined { return this.view.priority; }
 	get snap(): boolean { return !!this.view.snap; }
 
+	set enabled(enabled: boolean) {
+		this.container.style.pointerEvents = enabled ? null : 'none';
+	}
+
 	constructor(
 		protected container: HTMLElement,
 		private view: IView,
@@ -125,14 +129,12 @@ abstract class ViewItem {
 		}
 	}
 
-	layout(_orthogonalSize: number | undefined): void {
-		this.container.scrollTop = 0;
-		this.container.scrollLeft = 0;
-	}
-
-	layoutView(orthogonalSize: number | undefined): void {
+	layout(position: number, orthogonalSize: number | undefined): void {
+		this.layoutContainer(position);
 		this.view.layout(this.size, orthogonalSize);
 	}
+
+	abstract layoutContainer(position: number): void;
 
 	dispose(): IView {
 		this.disposable.dispose();
@@ -142,19 +144,17 @@ abstract class ViewItem {
 
 class VerticalViewItem extends ViewItem {
 
-	layout(orthogonalSize: number | undefined): void {
-		super.layout(orthogonalSize);
+	layoutContainer(position: number): void {
+		this.container.style.top = `${position}px`;
 		this.container.style.height = `${this.size}px`;
-		this.layoutView(orthogonalSize);
 	}
 }
 
 class HorizontalViewItem extends ViewItem {
 
-	layout(orthogonalSize: number | undefined): void {
-		super.layout(orthogonalSize);
+	layoutContainer(position: number): void {
+		this.container.style.left = `${position}px`;
 		this.container.style.width = `${this.size}px`;
-		this.layoutView(orthogonalSize);
 	}
 }
 
@@ -434,6 +434,10 @@ export class SplitView extends Disposable {
 	}
 
 	private onSashStart({ sash, start, alt }: ISashEvent): void {
+		for (const item of this.viewItems) {
+			item.enabled = false;
+		}
+
 		const index = firstIndex(this.sashItems, item => item.sash === sash);
 
 		// This way, we can press Alt while we resize a sash, macOS style!
@@ -539,6 +543,10 @@ export class SplitView extends Disposable {
 		this._onDidSashChange.fire(index);
 		this.sashDragState!.disposable.dispose();
 		this.saveProportions();
+
+		for (const item of this.viewItems) {
+			item.enabled = true;
+		}
 	}
 
 	private onViewChange(item: ViewItem, size: number | undefined): void {
@@ -853,7 +861,12 @@ export class SplitView extends Disposable {
 		this.contentSize = this.viewItems.reduce((r, i) => r + i.size, 0);
 
 		// Layout views
-		this.viewItems.forEach(item => item.layout(this.orthogonalSize));
+		let position = 0;
+
+		for (const viewItem of this.viewItems) {
+			viewItem.layout(position, this.orthogonalSize);
+			position += viewItem.size;
+		}
 
 		// Layout sashes
 		this.sashItems.forEach(item => item.sash.layout());
@@ -910,7 +923,7 @@ export class SplitView extends Disposable {
 			position += this.viewItems[i].size;
 
 			if (this.sashItems[i].sash === sash) {
-				return position;
+				return Math.min(position, this.contentSize - 2);
 			}
 		}
 

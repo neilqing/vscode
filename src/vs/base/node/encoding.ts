@@ -111,7 +111,7 @@ export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions
 				});
 			}
 
-			_final(callback: (error: Error | null) => void) {
+			_final(callback: () => void) {
 
 				// normal finish
 				if (this.decodeStream) {
@@ -122,7 +122,11 @@ export function toDecodeStream(readable: Readable, options: IDecodeStreamOptions
 				// detection. thus, wrap up starting the stream even
 				// without all the data to get things going
 				else {
-					this._startDecodeStream(() => this.decodeStream!.end(callback));
+					this._startDecodeStream(() => {
+						if (this.decodeStream) {
+							this.decodeStream.end(callback);
+						}
+					});
 				}
 			}
 		};
@@ -140,7 +144,7 @@ export function decode(buffer: Buffer, encoding: string): string {
 }
 
 export function encode(content: string | Buffer, encoding: string, options?: { addBOM?: boolean }): Buffer {
-	return iconv.encode(content, toNodeEncoding(encoding), options);
+	return iconv.encode(content as string /* TODO report into upstream typings */, toNodeEncoding(encoding), options);
 }
 
 export function encodingExists(encoding: string): boolean {
@@ -195,27 +199,25 @@ export function detectEncodingByBOMFromBuffer(buffer: Buffer | VSBuffer | null, 
 	return null;
 }
 
-const MINIMUM_THRESHOLD = 0.2;
-const IGNORE_ENCODINGS = ['ascii', 'utf-8', 'utf-16', 'utf-32'];
-
 /**
  * Guesses the encoding from buffer.
  */
 async function guessEncodingByBuffer(buffer: Buffer): Promise<string | null> {
 	const jschardet = await import('jschardet');
 
-	jschardet.Constants.MINIMUM_THRESHOLD = MINIMUM_THRESHOLD;
-
 	const guessed = jschardet.detect(buffer);
 	if (!guessed || !guessed.encoding) {
 		return null;
 	}
 
-	const enc = guessed.encoding.toLowerCase();
-
-	// Ignore encodings that cannot guess correctly
-	// (http://chardet.readthedocs.io/en/latest/supported-encodings.html)
-	if (0 <= IGNORE_ENCODINGS.indexOf(enc)) {
+	// Ignore 'ascii' as guessed encoding because that
+	// is almost never what we want, rather fallback
+	// to the configured encoding then. Otherwise,
+	// opening a ascii-only file with auto guessing
+	// enabled will put the file into 'ascii' mode
+	// and thus typing any special characters is
+	// not possible anymore.
+	if (guessed.encoding.toLowerCase() === 'ascii') {
 		return null;
 	}
 
